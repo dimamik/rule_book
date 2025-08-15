@@ -6,8 +6,8 @@ defmodule RuleBook do
              |> String.split("<!-- MDOC -->")
              |> Enum.fetch!(1)
 
-  alias RuleBook.Types
   alias RuleBook.Engine
+  alias RuleBook.Types
 
   @typedoc "A fact is any Elixir term"
   @type fact :: term()
@@ -18,7 +18,15 @@ defmodule RuleBook do
   @typedoc "Activation entry"
   @type activation :: %{rule: atom(), bindings: binding(), salience: integer()}
 
-  defstruct rules: [], memory: nil, agenda: [], metrics: %{}, options: %{}, tokens: MapSet.new()
+  defstruct rules: [],
+            memory: nil,
+            agenda: [],
+            metrics: %{},
+            options: %{},
+            # tokens: activations fired in current memory state (prevents immediate re-fire)
+            tokens: MapSet.new(),
+            # once_tokens: activations for rules declared as once (persist across memory changes)
+            once_tokens: MapSet.new()
 
   @type t :: %__MODULE__{
           rules: [Types.Rule.t()],
@@ -26,7 +34,8 @@ defmodule RuleBook do
           agenda: [activation()],
           metrics: map(),
           options: map(),
-          tokens: MapSet.t()
+          tokens: MapSet.t(),
+          once_tokens: MapSet.t()
         }
 
   @doc """
@@ -36,7 +45,7 @@ defmodule RuleBook do
     * `:rules` - a module using `RuleBook.DSL` or a list of such modules
     * `:pure` - when true, actions return effects without applying them
   """
-  @spec new(keyword()) :: {:ok, t()}
+  @spec new(keyword()) :: t()
   def new(opts \\ []) do
     rules_mods = List.wrap(Keyword.get(opts, :rules, []))
     rules = Enum.flat_map(rules_mods, &compile_rules/1)
@@ -56,6 +65,8 @@ defmodule RuleBook do
   @spec assert(t(), fact()) :: t()
   def assert(%__MODULE__{} = rb, fact) do
     {memory, changed_ids} = Engine.Memory.assert(rb.memory, fact)
+    # Keep tokens to avoid re-firing the same activation when asserting new facts
+    # from within an action. We'll still rebuild the agenda to include any new activations.
     rb = %__MODULE__{rb | memory: memory}
     recompute_agenda(rb, changed_ids)
   end
@@ -64,6 +75,7 @@ defmodule RuleBook do
   @spec retract(t(), fact_id() | fact()) :: t()
   def retract(%__MODULE__{} = rb, id_or_fact) do
     {memory, changed_ids} = Engine.Memory.retract(rb.memory, id_or_fact)
+    # Do not clear tokens globally; the removed activations will not be rebuilt anyway.
     rb = %__MODULE__{rb | memory: memory}
     recompute_agenda(rb, changed_ids)
   end
@@ -71,6 +83,28 @@ defmodule RuleBook do
   @doc "Insert or update a fact. If equal, no-op."
   @spec upsert(t(), fact()) :: t()
   def upsert(%__MODULE__{} = rb, fact) do
+    {memory, changed_ids} = Engine.Memory.upsert(rb.memory, fact)
+    # Keep tokens to avoid unnecessary re-firing on updates.
+    rb = %__MODULE__{rb | memory: memory}
+    recompute_agenda(rb, changed_ids)
+  end
+
+  @doc false
+  @spec apply_effect(t(), {:assert, fact()} | {:retract, fact_id() | fact()} | {:upsert, fact()}) ::
+          t()
+  def apply_effect(%__MODULE__{} = rb, {:assert, fact}) do
+    {memory, changed_ids} = Engine.Memory.assert(rb.memory, fact)
+    rb = %__MODULE__{rb | memory: memory}
+    recompute_agenda(rb, changed_ids)
+  end
+
+  def apply_effect(%__MODULE__{} = rb, {:retract, id_or_fact}) do
+    {memory, changed_ids} = Engine.Memory.retract(rb.memory, id_or_fact)
+    rb = %__MODULE__{rb | memory: memory}
+    recompute_agenda(rb, changed_ids)
+  end
+
+  def apply_effect(%__MODULE__{} = rb, {:upsert, fact}) do
     {memory, changed_ids} = Engine.Memory.upsert(rb.memory, fact)
     rb = %__MODULE__{rb | memory: memory}
     recompute_agenda(rb, changed_ids)
@@ -123,7 +157,16 @@ defmodule RuleBook do
   def metrics(%__MODULE__{} = rb), do: rb.metrics
 
   defp recompute_agenda(%__MODULE__{} = rb, changed_ids) do
-    agenda = Engine.build_agenda(rb.rules, rb.memory, rb.tokens, changed_ids, rb.options)
+    agenda =
+      Engine.build_agenda(
+        rb.rules,
+        rb.memory,
+        rb.tokens,
+        rb.once_tokens,
+        changed_ids,
+        rb.options
+      )
+
     %__MODULE__{rb | agenda: agenda}
   end
 end

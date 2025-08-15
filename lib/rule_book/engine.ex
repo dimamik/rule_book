@@ -47,9 +47,29 @@ defmodule RuleBook.Engine do
     end
 
     @doc "Retract a fact by id, returning updated memory and changed ids."
+    # Retract by composite key directly
+    def retract(%__MODULE__{} = m, {_, _} = key) do
+      if Map.has_key?(m.by_id, key) do
+        m = %__MODULE__{m | by_id: Map.delete(m.by_id, key)}
+        # expose just the second element as id for compatibility
+        RuleBook.Telemetry.exec([:rule_book, :memory, :retract], %{}, %{id: elem(key, 1)})
+        {m, [elem(key, 1)]}
+      else
+        {m, []}
+      end
+    end
+
+    # Retract by simple id (integer/binary/atom) for backward compatibility
     def retract(%__MODULE__{} = m, id) when is_integer(id) or is_binary(id) or is_atom(id) do
-      if Map.has_key?(m.by_id, id) do
-        m = %__MODULE__{m | by_id: Map.delete(m.by_id, id)}
+      key =
+        Enum.find(Map.keys(m.by_id), fn
+          {_, ^id} -> true
+          other when other == id -> true
+          _ -> false
+        end)
+
+      if key do
+        m = %__MODULE__{m | by_id: Map.delete(m.by_id, key)}
         RuleBook.Telemetry.exec([:rule_book, :memory, :retract], %{}, %{id: id})
         {m, [id]}
       else
@@ -65,13 +85,16 @@ defmodule RuleBook.Engine do
       %__MODULE__{m | by_id: Map.put(m.by_id, id, fact)}
     end
 
-    # trivial id function; users can define structs with id, or we use the term itself
-    defp fact_id(%{id: id}) when not is_nil(id), do: id
-    defp fact_id(fact), do: :erlang.phash2(fact)
+    # Composite id function prevents collisions across different struct types.
+    # For structs with an :id field, use {StructModule, id}
+    # For plain maps with :id, use {:map, id}; otherwise hash the term.
+    defp fact_id(%{__struct__: mod, id: id}) when not is_nil(id), do: {mod, id}
+    defp fact_id(%{id: id}) when not is_nil(id), do: {:map, id}
+    defp fact_id(fact), do: {:term, :erlang.phash2(fact)}
   end
 
   @doc "Build agenda from rules and memory. Optionally restrict by changed_ids."
-  def build_agenda(rules, %Memory{} = memory, tokens, _changed_ids, options) do
+  def build_agenda(rules, %Memory{} = memory, tokens, once_tokens, _changed_ids, options) do
     facts = Memory.facts(memory)
     start = System.monotonic_time()
 
@@ -90,7 +113,7 @@ defmodule RuleBook.Engine do
         }
       end)
     end)
-    |> filter_fired_tokens(tokens)
+    |> filter_fired_tokens(tokens, once_tokens)
     |> apply_conflict_resolution(options)
     |> tap(fn acts ->
       duration = System.monotonic_time() - start
@@ -148,8 +171,11 @@ defmodule RuleBook.Engine do
   end
 
   @doc false
-  defp filter_fired_tokens(acts, tokens) do
-    Enum.reject(acts, fn act -> MapSet.member?(tokens, act[:token]) end)
+  defp filter_fired_tokens(acts, tokens, once_tokens) do
+    Enum.reject(acts, fn act ->
+      MapSet.member?(tokens, act[:token]) or
+        (act[:once] == true and MapSet.member?(once_tokens, act[:token]))
+    end)
   end
 
   @doc false
@@ -179,24 +205,11 @@ defmodule RuleBook.Engine do
     ctx = %{rb: rb, binding: bindings, effects: []}
     res = do_action(rule.action, ctx)
 
-    token = {rule.name, bindings}
+    rb_with_token = add_activation_tokens(rb, rule.name, bindings, rule.once)
 
-    rb_with_token = %{
-      rb
-      | tokens: MapSet.put(rb.tokens, token)
-    }
+    effs = normalize_effects(res)
 
-    {rb2, effects} =
-      case res do
-        {:effects, effs} ->
-          apply_effects(rb_with_token, effs)
-
-        %{} = new_ctx when is_map(new_ctx) ->
-          apply_effects(rb_with_token, Map.get(new_ctx, :effects, []))
-
-        other ->
-          apply_effects(rb_with_token, List.wrap(other))
-      end
+    {rb2, effects} = apply_effects_based_on_mode(rb_with_token, effs)
 
     duration = System.monotonic_time() - start
 
@@ -208,30 +221,61 @@ defmodule RuleBook.Engine do
     {rb2, effects}
   end
 
+  defp add_activation_tokens(rb, rule_name, bindings, once?) do
+    token = {rule_name, bindings}
+    rb = Map.update!(rb, :tokens, fn set -> MapSet.put(set, token) end)
+    if once?, do: Map.update!(rb, :once_tokens, fn set -> MapSet.put(set, token) end), else: rb
+  end
+
+  defp normalize_effects(res) do
+    case res do
+      {:effects, effs} -> effs
+      %{} = new_ctx when is_map(new_ctx) -> Map.get(new_ctx, :effects, [])
+      other -> List.wrap(other)
+    end
+  end
+
+  defp apply_effects_based_on_mode(rb, effs) do
+    effs = List.wrap(effs)
+    if pure?(rb), do: {rb, effs}, else: apply_effects(rb, effs)
+  end
+
   defp do_action({m, f, a}, ctx), do: apply(m, f, [ctx | a])
   defp do_action(fun, ctx) when is_function(fun, 1), do: fun.(ctx)
 
+  defp pure?(%{options: opts}) do
+    cond do
+      is_map(opts) -> Map.get(opts, :pure, false)
+      is_list(opts) -> Keyword.get(opts, :pure, false)
+      true -> false
+    end
+  end
+
   @doc false
   defp apply_effects(rb, effects) do
-    Enum.reduce(effects, {rb, []}, fn eff, {acc_rb, acc_effs} ->
-      case eff do
-        {:assert, fact} ->
-          RuleBook.Telemetry.exec([:rule_book, :effect, :assert], %{}, %{})
-          {RuleBook.assert(acc_rb, fact), [eff | acc_effs]}
-
-        {:retract, id_or_fact} ->
-          RuleBook.Telemetry.exec([:rule_book, :effect, :retract], %{}, %{})
-          {RuleBook.retract(acc_rb, id_or_fact), [eff | acc_effs]}
-
-        {:emit, name, payload} ->
-          {acc_rb, [{:emit, name, payload} | acc_effs]}
-
-        {:log, _lvl, _msg} ->
-          {acc_rb, [eff | acc_effs]}
-
-        _ ->
-          {acc_rb, acc_effs}
-      end
-    end)
+    Enum.reduce(effects, {rb, []}, &handle_effect/2)
   end
+
+  # Separate effect handlers to keep nesting shallow for Credo
+  defp handle_effect({:assert, fact}, {acc_rb, acc_effs}) do
+    RuleBook.Telemetry.exec([:rule_book, :effect, :assert], %{}, %{})
+
+    # Use internal effect application that preserves tokens (do not clear per-state tokens mid-activation)
+    {RuleBook.apply_effect(acc_rb, {:assert, fact}), [{:assert, fact} | acc_effs]}
+  end
+
+  defp handle_effect({:retract, id_or_fact}, {acc_rb, acc_effs}) do
+    RuleBook.Telemetry.exec([:rule_book, :effect, :retract], %{}, %{})
+    {RuleBook.apply_effect(acc_rb, {:retract, id_or_fact}), [{:retract, id_or_fact} | acc_effs]}
+  end
+
+  defp handle_effect({:emit, name, payload}, {acc_rb, acc_effs}) do
+    {acc_rb, [{:emit, name, payload} | acc_effs]}
+  end
+
+  defp handle_effect({:log, _lvl, _msg} = eff, {acc_rb, acc_effs}) do
+    {acc_rb, [eff | acc_effs]}
+  end
+
+  defp handle_effect(_other, acc), do: acc
 end
