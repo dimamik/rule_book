@@ -58,7 +58,7 @@ defmodule RuleBook.MixProject do
   defp package do
     [
       licenses: ["MIT"],
-      links: %{"GitHub" => "https://github.com/yourname/rule_book"},
+      links: %{"GitHub" => "https://github.com/dimamik/rule_book"},
       files: ~w(lib mix.exs README.md LICENSE CHANGELOG.md docs)
     ]
   end

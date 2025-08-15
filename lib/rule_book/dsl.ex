@@ -34,18 +34,30 @@ defmodule RuleBook.DSL do
   defmacro defrule(name, opts) when is_list(opts) do
     {patterns_ast, action_ast, meta} = extract_opts(opts)
 
-    # Build private matcher functions and collect their names
-    {matcher_defs, matcher_names} = build_matchers(name, patterns_ast)
+    # Build private matcher and guard functions and collect their names
+    {matcher_defs, matcher_names, guard_names} = build_matchers(name, patterns_ast)
 
     action_fun_name = action_fun_name(name)
     action_def = build_action_def(action_fun_name, action_ast)
 
     patterns_list_ast =
-      for fun_name <- matcher_names do
+      matcher_names
+      |> Enum.zip(guard_names)
+      |> Enum.map(fn {m_fun, g_fun} ->
         quote do
-          %RuleBook.Types.Pattern{matcher: &(__MODULE__.unquote(fun_name) / 1)}
+          %RuleBook.Types.Pattern{
+            matcher: &(__MODULE__.unquote(m_fun) / 1),
+            guard:
+              unquote(
+                if g_fun do
+                  quote do: &(__MODULE__.unquote(g_fun) / 1)
+                else
+                  nil
+                end
+              )
+          }
         end
-      end
+      end)
 
     quote do
       unquote_splicing(matcher_defs)
@@ -87,13 +99,15 @@ defmodule RuleBook.DSL do
     {patterns, action, meta}
   end
 
-  # Turn patterns into private matcher functions and return {defs, names}
+  # Turn patterns into private matcher functions (and optional guard functions)
+  # and return {defs, matcher_names, guard_names}
   defp build_matchers(rule_name, patterns_ast) do
     patterns_ast
     |> Enum.with_index()
     |> Enum.map(fn {pat_ast, idx} ->
       fun_name = matcher_fun_name(rule_name, idx)
       pat_only = strip_when(pat_ast)
+      guard_ast = extract_guard(pat_ast)
       var_names = collect_vars(pat_only)
       bindings_map_ast = build_bindings_map(var_names)
 
@@ -101,15 +115,24 @@ defmodule RuleBook.DSL do
         quote do
           def unquote(fun_name)(fact) do
             case fact do
-              unquote(pat_ast) -> {:ok, unquote(bindings_map_ast)}
+              unquote(pat_only) -> {:ok, unquote(bindings_map_ast)}
               _ -> :nomatch
             end
           end
         end
 
-      {def_ast, fun_name}
+      {guard_def, guard_fun_name_or_nil} =
+        build_guard(rule_name, idx, guard_ast)
+
+      {quote do
+         unquote(def_ast)
+         unquote(guard_def)
+       end, fun_name, guard_fun_name_or_nil}
     end)
-    |> Enum.unzip()
+    |> Enum.reduce({[], [], []}, fn {def_ast, m_fun, g_fun}, {defs, ms, gs} ->
+      {[def_ast | defs], [m_fun | ms], [g_fun | gs]}
+    end)
+    |> then(fn {defs, ms, gs} -> {Enum.reverse(defs), Enum.reverse(ms), Enum.reverse(gs)} end)
   end
 
   defp matcher_fun_name(rule_name, idx),
@@ -125,6 +148,9 @@ defmodule RuleBook.DSL do
 
   defp strip_when({:when, _m, [pat, _guard]}), do: pat
   defp strip_when(other), do: other
+
+  defp extract_guard({:when, _m, [_pat, guard]}), do: guard
+  defp extract_guard(_other), do: nil
 
   defp collect_vars(ast) do
     {_ast, acc} =
@@ -154,5 +180,37 @@ defmodule RuleBook.DSL do
   defp build_bindings_map(var_names) do
     kvs = Enum.map(var_names, fn v -> {v, {v, [], nil}} end)
     {:%{}, [], kvs}
+  end
+
+  defp guard_fun_name(rule_name, idx),
+    do: String.to_atom("__rb_guard_" <> to_string(rule_name) <> "_" <> Integer.to_string(idx))
+
+  defp build_guard(_rule_name, _idx, nil), do: {quote(do: nil), nil}
+
+  defp build_guard(rule_name, idx, guard_ast) do
+    vars = collect_vars(guard_ast)
+
+    assigns =
+      Enum.map(vars, fn v ->
+        quote do
+          unquote(Macro.var(v, nil)) = Map.fetch!(bindings, unquote(v))
+        end
+      end)
+
+    gname = guard_fun_name(rule_name, idx)
+
+    def_ast =
+      quote do
+        def unquote(gname)(bindings) when is_map(bindings) do
+          try do
+            unquote_splicing(assigns)
+            !!unquote(guard_ast)
+          rescue
+            _ -> false
+          end
+        end
+      end
+
+    {def_ast, gname}
   end
 end

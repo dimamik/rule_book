@@ -63,30 +63,88 @@ defmodule RuleBook.Engine do
   end
 
   @doc "Build agenda from rules and memory. Optionally restrict by changed_ids."
-  def build_agenda(rules, %Memory{} = memory, tokens, changed_ids, options) do
+  def build_agenda(rules, %Memory{} = memory, tokens, _changed_ids, options) do
     facts = Memory.facts(memory)
 
     rules
     |> Enum.flat_map(fn %Types.Rule{} = rule ->
       match_rule(rule, facts)
       |> Enum.map(fn bindings ->
-        %{rule: rule.name, bindings: bindings, salience: rule.salience}
+        token = {rule.name, bindings}
+
+        %{
+          rule: rule.name,
+          bindings: bindings,
+          salience: rule.salience,
+          once: rule.once,
+          token: token
+        }
       end)
     end)
+    |> filter_fired_tokens(tokens)
     |> apply_conflict_resolution(options)
   end
 
   defp match_rule(%Types.Rule{patterns: patterns}, facts) do
-    # naive AND across patterns where each pattern must match at least one fact
-    Enum.reduce(patterns, [%{}], fn %Types.Pattern{matcher: m}, acc ->
+    # AND across patterns with unification and per-pattern guards
+    Enum.reduce(patterns, [%{}], fn %Types.Pattern{matcher: m, guard: g}, acc ->
       for b <- acc, f <- facts, reduce: [] do
         bs ->
           case m.(f) do
-            {:ok, b2} -> [Map.merge(b, b2) | bs]
-            :nomatch -> bs
+            {:ok, b2} ->
+              case unify(b, b2) do
+                {:ok, merged} ->
+                  if (is_function(g, 1) && g.(merged)) || is_nil(g) do
+                    [merged | bs]
+                  else
+                    bs
+                  end
+
+                :conflict ->
+                  bs
+              end
+
+            :nomatch ->
+              bs
           end
       end
     end)
+  end
+
+  defp unify(a, b) when a == %{}, do: {:ok, b}
+  defp unify(a, b) when b == %{}, do: {:ok, a}
+
+  defp unify(a, b) do
+    try do
+      Enum.reduce_while((Map.keys(a) ++ Map.keys(b)) |> Enum.uniq(), %{}, fn k, acc ->
+        va = Map.fetch(a, k)
+        vb = Map.fetch(b, k)
+
+        case {va, vb} do
+          {:error, {:ok, v}} ->
+            {:cont, Map.put(acc, k, v)}
+
+          {{:ok, v}, :error} ->
+            {:cont, Map.put(acc, k, v)}
+
+          {{:ok, v1}, {:ok, v2}} ->
+            if v1 == v2, do: {:cont, Map.put(acc, k, v1)}, else: {:halt, :conflict}
+
+          {:error, :error} ->
+            {:cont, acc}
+        end
+      end)
+      |> case do
+        :conflict -> :conflict
+        merged -> {:ok, merged}
+      end
+    rescue
+      _ -> :conflict
+    end
+  end
+
+  defp filter_fired_tokens(acts, tokens) do
+    Enum.reject(acts, fn act -> MapSet.member?(tokens, act[:token]) end)
   end
 
   defp apply_conflict_resolution(acts, options) do
@@ -114,11 +172,23 @@ defmodule RuleBook.Engine do
     ctx = %{rb: rb, binding: bindings, effects: []}
     res = do_action(rule.action, ctx)
 
+    token = {rule.name, bindings}
+
+    rb_with_token = %{
+      rb
+      | tokens: MapSet.put(rb.tokens, token)
+    }
+
     {rb2, effects} =
       case res do
-        {:effects, effs} -> apply_effects(rb, effs)
-        %{} = new_ctx when is_map(new_ctx) -> apply_effects(rb, Map.get(new_ctx, :effects, []))
-        other -> apply_effects(rb, List.wrap(other))
+        {:effects, effs} ->
+          apply_effects(rb_with_token, effs)
+
+        %{} = new_ctx when is_map(new_ctx) ->
+          apply_effects(rb_with_token, Map.get(new_ctx, :effects, []))
+
+        other ->
+          apply_effects(rb_with_token, List.wrap(other))
       end
 
     {rb2, effects}

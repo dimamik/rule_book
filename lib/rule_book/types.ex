@@ -30,7 +30,12 @@ defmodule RuleBook.Types do
 
   defmodule Pattern do
     @moduledoc "Pattern with optional guard and extractor for bindings."
-    defstruct [:matcher]
-    @type t :: %__MODULE__{matcher: (term() -> {:ok, map()} | :nomatch)}
+    defstruct [:matcher, :guard]
+
+    @type t :: %__MODULE__{
+            matcher: (term() -> {:ok, map()} | :nomatch),
+            # guard receives the merged bindings so far and must return truthy/falsey
+            guard: nil | (map() -> as_boolean(term()))
+          }
   end
 end
