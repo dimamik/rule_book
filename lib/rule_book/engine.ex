@@ -13,20 +13,20 @@ defmodule RuleBook.Engine do
     def facts(%__MODULE__{by_id: by_id}), do: Map.values(by_id)
 
     @doc "Assert a fact, returning updated memory and list of changed ids."
-  def assert(%__MODULE__{} = m, fact) do
+    def assert(%__MODULE__{} = m, fact) do
       id = fact_id(fact)
 
       if Map.has_key?(m.by_id, id) do
         {m, []}
       else
-    m = put_fact(m, id, fact)
-    RuleBook.Telemetry.exec([:rule_book, :memory, :assert], %{}, %{id: id})
+        m = put_fact(m, id, fact)
+        RuleBook.Telemetry.exec([:rule_book, :memory, :assert], %{}, %{id: id})
         {m, [id]}
       end
     end
 
     @doc "Insert or update a fact, returning updated memory and changed ids."
-  def upsert(%__MODULE__{} = m, fact) do
+    def upsert(%__MODULE__{} = m, fact) do
       id = fact_id(fact)
 
       case Map.fetch(m.by_id, id) do
@@ -47,10 +47,10 @@ defmodule RuleBook.Engine do
     end
 
     @doc "Retract a fact by id, returning updated memory and changed ids."
-  def retract(%__MODULE__{} = m, id) when is_integer(id) or is_binary(id) or is_atom(id) do
+    def retract(%__MODULE__{} = m, id) when is_integer(id) or is_binary(id) or is_atom(id) do
       if Map.has_key?(m.by_id, id) do
-    m = %__MODULE__{m | by_id: Map.delete(m.by_id, id)}
-    RuleBook.Telemetry.exec([:rule_book, :memory, :retract], %{}, %{id: id})
+        m = %__MODULE__{m | by_id: Map.delete(m.by_id, id)}
+        RuleBook.Telemetry.exec([:rule_book, :memory, :retract], %{}, %{id: id})
         {m, [id]}
       else
         {m, []}
@@ -72,8 +72,8 @@ defmodule RuleBook.Engine do
 
   @doc "Build agenda from rules and memory. Optionally restrict by changed_ids."
   def build_agenda(rules, %Memory{} = memory, tokens, _changed_ids, options) do
-  facts = Memory.facts(memory)
-  start = System.monotonic_time()
+    facts = Memory.facts(memory)
+    start = System.monotonic_time()
 
     rules
     |> Enum.flat_map(fn %Types.Rule{} = rule ->
@@ -94,7 +94,10 @@ defmodule RuleBook.Engine do
     |> apply_conflict_resolution(options)
     |> tap(fn acts ->
       duration = System.monotonic_time() - start
-      RuleBook.Telemetry.exec([:rule_book, :agenda, :build], %{duration: duration}, %{count: length(acts)})
+
+      RuleBook.Telemetry.exec([:rule_book, :agenda, :build], %{duration: duration}, %{
+        count: length(acts)
+      })
     end)
   end
 
@@ -171,7 +174,7 @@ defmodule RuleBook.Engine do
 
   @doc "Fire an activation: call the action with a context and apply effects if not in pure mode."
   def fire_activation(%{rules: rules} = rb, %{rule: name, bindings: bindings} = _act) do
-  start = System.monotonic_time()
+    start = System.monotonic_time()
     rule = Enum.find(rules, &(&1.name == name))
     ctx = %{rb: rb, binding: bindings, effects: []}
     res = do_action(rule.action, ctx)
@@ -195,9 +198,14 @@ defmodule RuleBook.Engine do
           apply_effects(rb_with_token, List.wrap(other))
       end
 
-  duration = System.monotonic_time() - start
-  RuleBook.Telemetry.exec([:rule_book, :activation, :fire], %{duration: duration}, %{rule: name, effects: length(effects)})
-  {rb2, effects}
+    duration = System.monotonic_time() - start
+
+    RuleBook.Telemetry.exec([:rule_book, :activation, :fire], %{duration: duration}, %{
+      rule: name,
+      effects: length(effects)
+    })
+
+    {rb2, effects}
   end
 
   defp do_action({m, f, a}, ctx), do: apply(m, f, [ctx | a])
@@ -210,12 +218,19 @@ defmodule RuleBook.Engine do
         {:assert, fact} ->
           RuleBook.Telemetry.exec([:rule_book, :effect, :assert], %{}, %{})
           {RuleBook.assert(acc_rb, fact), [eff | acc_effs]}
+
         {:retract, id_or_fact} ->
           RuleBook.Telemetry.exec([:rule_book, :effect, :retract], %{}, %{})
           {RuleBook.retract(acc_rb, id_or_fact), [eff | acc_effs]}
-        {:emit, name, payload} -> {acc_rb, [{:emit, name, payload} | acc_effs]}
-        {:log, _lvl, _msg} -> {acc_rb, [eff | acc_effs]}
-        _ -> {acc_rb, acc_effs}
+
+        {:emit, name, payload} ->
+          {acc_rb, [{:emit, name, payload} | acc_effs]}
+
+        {:log, _lvl, _msg} ->
+          {acc_rb, [eff | acc_effs]}
+
+        _ ->
+          {acc_rb, acc_effs}
       end
     end)
   end

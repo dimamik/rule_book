@@ -37,7 +37,7 @@ defmodule RuleBook.FraudDetectionTest do
     user = %FraudRules.User{id: 1, country: :US}
     payment = %FraudRules.Payment{id: 10, user_id: 1, amount: 12_500, country: :DE}
 
-    {:ok, rb} = RuleBook.new(rules: FraudRules)
+    rb = RuleBook.new(rules: FraudRules)
     rb = rb |> RuleBook.assert(user) |> RuleBook.assert(payment)
     {rb, acts} = RuleBook.run(rb)
 
@@ -57,7 +57,7 @@ defmodule RuleBook.FraudDetectionTest do
     user = %FraudRules.User{id: 1, country: :US}
     payment = %FraudRules.Payment{id: 11, user_id: 1, amount: 5_000, country: :US}
 
-    {:ok, rb} = RuleBook.new(rules: FraudRules)
+    rb = RuleBook.new(rules: FraudRules)
     rb = rb |> RuleBook.assert(user) |> RuleBook.assert(payment)
     {rb, _acts} = RuleBook.run(rb)
 
@@ -75,7 +75,7 @@ defmodule RuleBook.FraudDetectionTest do
     user = %FraudRules.User{id: 1, country: :US}
     payment = %FraudRules.Payment{id: 10, user_id: 2, amount: 12_500, country: :DE}
 
-    {:ok, rb} = RuleBook.new(rules: FraudRules)
+    rb = RuleBook.new(rules: FraudRules)
     rb = rb |> RuleBook.assert(user) |> RuleBook.assert(payment)
     {rb, _acts} = RuleBook.run(rb)
 

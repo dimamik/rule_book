@@ -1,36 +1,10 @@
 defmodule RuleBook do
-  @external_resource readme_path = Path.expand("../../README.md", __DIR__)
-  @readme_intro (case File.read(readme_path) do
-                   {:ok, content} ->
-                     content
-                     |> String.split("<!-- RULEBOOK:INTRO:START -->")
-                     |> List.last()
-                     |> String.split("<!-- RULEBOOK:INTRO:END -->")
-                     |> List.first()
-                     |> String.trim()
+  @external_resource readme = Path.join([__DIR__, "../README.md"])
 
-                   _ ->
-                     ""
-                 end)
-
-  @moduledoc """
-  #{@readme_intro}
-
-  Terminology:
-  - Rules: Modules that `use RuleBook.Rules` and define `defrule` clauses.
-  - Fact: Any Elixir term asserted into the working memory.
-  - Pattern: A struct/map pattern in a rule's `when:` list. Patterns may include guards.
-  - Binding: Map of variables bound by matched patterns and unified across them.
-  - Agenda: Ordered list of activations ready to fire.
-  - Activation: A rule + bindings scheduled to run.
-  - Effects: Pure data describing side-effects produced by actions (assert, retract, emit, log).
-
-  Purity and side-effects:
-  - Rule actions should be pure. They return effects using `RuleBook.Action` helpers.
-  - The engine applies effects to the session. Emitted events (`{:emit, name, payload}`) are not delivered anywhere by default; your application is responsible for reacting to them.
-
-  See `RuleBook.Rules` for how to define rules.
-  """
+  @moduledoc readme
+             |> File.read!()
+             |> String.split("<!-- MDOC -->")
+             |> Enum.fetch!(1)
 
   alias RuleBook.Types
   alias RuleBook.Engine
@@ -67,8 +41,7 @@ defmodule RuleBook do
     rules_mods = List.wrap(Keyword.get(opts, :rules, []))
     rules = Enum.flat_map(rules_mods, &compile_rules/1)
     memory = Engine.Memory.new()
-    rb = %__MODULE__{rules: rules, memory: memory, options: Map.new(opts)}
-    {:ok, rb}
+    %__MODULE__{rules: rules, memory: memory, options: Map.new(opts)}
   end
 
   defp compile_rules(mod) when is_atom(mod) do

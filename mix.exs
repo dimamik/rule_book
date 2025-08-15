@@ -1,31 +1,34 @@
 defmodule RuleBook.MixProject do
   use Mix.Project
 
+  @version "0.1.0"
+  @source_url "https://github.com/dimamik/rule_book"
+
   def project do
     [
       app: :rule_book,
-      version: "0.1.0",
+      version: @version,
       elixir: "~> 1.15",
+      elixirc_paths: elixirc_paths(Mix.env()),
       start_permanent: Mix.env() == :prod,
       deps: deps(),
+      aliases: aliases(),
+      # Hex
+      package: package(),
       description: "A lightweight, deterministic forward-chaining rules engine for Elixir.",
       package: package(),
       source_url: "https://github.com/yourname/rule_book",
       homepage_url: "https://hex.pm/packages/rule_book",
       elixirc_paths: elixirc_paths(Mix.env()),
       docs: [
-        main: "readme",
-        extras: [
-          "README.md",
-          "docs/guides/getting_started.md",
-          "docs/guides/dsl_reference.md",
-          "docs/guides/cookbook.md"
-        ],
-        source_ref: "v0.1.0"
-      ],
-      preferred_cli_env: [
-        coveralls: :test,
-        "coveralls.html": :test
+        main: "RuleBook",
+        api_reference: false,
+        source_ref: "v#{@version}",
+        source_url: @source_url,
+        groups_for_modules: groups_for_modules(),
+        formatters: ["html"],
+        extras: extras(),
+        skip_undefined_reference_warnings_on: ["CHANGELOG.md"]
       ]
     ]
   end
@@ -50,11 +53,49 @@ defmodule RuleBook.MixProject do
     ]
   end
 
+  defp aliases do
+    [
+      release: [
+        "cmd git tag v#{@version}",
+        "cmd git push",
+        "cmd git push --tags",
+        "hex.publish --yes"
+      ],
+      "test.reset": ["ecto.drop --quiet", "test.setup"],
+      "test.setup": ["ecto.create --quiet", "ecto.migrate --quiet"],
+      "test.ci": [
+        "format --check-formatted",
+        "deps.unlock --check-unused",
+        "credo --strict",
+        "test --raise"
+      ]
+    ]
+  end
+
+  defp extras do
+    [
+      # TODO Add more guides
+      "CHANGELOG.md": [title: "Changelog"]
+    ]
+  end
+
   defp package do
     [
+      maintainers: ["Dima Mikielewicz"],
       licenses: ["MIT"],
-      links: %{"GitHub" => "https://github.com/dimamik/rule_book"},
+      links: %{
+        Website: "https://dimamik.com",
+        Changelog: "#{@source_url}/blob/main/CHANGELOG.md",
+        GitHub: @source_url
+      },
+      licenses: ["MIT"],
       files: ~w(lib mix.exs README.md LICENSE CHANGELOG.md docs)
+    ]
+  end
+
+  defp groups_for_modules do
+    [
+      # TODO
     ]
   end
 end

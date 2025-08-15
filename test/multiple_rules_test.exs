@@ -25,14 +25,14 @@ defmodule RuleBook.MultipleRulesTest do
   end
 
   test "multiple rules activate and are ordered by salience" do
-    {:ok, rb} = RuleBook.new(rules: Rules)
+    rb = RuleBook.new(rules: Rules)
     rb = RuleBook.assert(rb, %Order{id: 1, total: 150})
     acts = RuleBook.agenda(rb)
     assert [%{rule: :r_high}, %{rule: :r_mid}, %{rule: :r_low}] = Enum.map(acts, &%{rule: &1.rule})
   end
 
   test "rules fire independently across steps" do
-    {:ok, rb} = RuleBook.new(rules: Rules)
+    rb = RuleBook.new(rules: Rules)
     rb = RuleBook.assert(rb, %Order{id: 2, total: 50})
 
     {rb, act1} = RuleBook.step(rb)

@@ -19,7 +19,7 @@ defmodule RuleBook.EngineMatchTest do
   end
 
   test "agenda contains activation when facts match" do
-    {:ok, rb} = RuleBook.new(rules: Rules)
+    rb = RuleBook.new(rules: Rules)
 
     rb =
       rb

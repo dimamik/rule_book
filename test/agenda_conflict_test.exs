@@ -20,7 +20,7 @@ defmodule RuleBook.AgendaConflictTest do
   end
 
   test "higher salience first" do
-    {:ok, rb} = RuleBook.new(rules: Rules)
+    rb = RuleBook.new(rules: Rules)
     rb = RuleBook.assert(rb, %Order{id: 1, total: 200})
     acts = RuleBook.agenda(rb)
     assert [%{rule: :r2}, %{rule: :r1}] = acts
