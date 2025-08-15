@@ -31,12 +31,7 @@ defmodule RuleBook.MixProject do
   end
 
   # Run "mix help compile.app" to learn about applications.
-  def application do
-    [
-      extra_applications: [:logger],
-      mod: {RuleBook.Application, []}
-    ]
-  end
+  def application, do: [extra_applications: [:logger]]
 
   defp elixirc_paths(:test), do: ["lib", "test/support"]
   defp elixirc_paths(_), do: ["lib"]

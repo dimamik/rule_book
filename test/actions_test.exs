@@ -1,6 +1,6 @@
 defmodule RuleBook.ActionsTest do
   use ExUnit.Case, async: true
-  alias RuleBook.DSL
+
   import RuleBook.Action
 
   defmodule Order do
@@ -8,7 +8,7 @@ defmodule RuleBook.ActionsTest do
   end
 
   defmodule Rules do
-    use DSL
+    use RuleBook.Rules
 
     defrule :emit_on_large,
       when: [%Order{id: id, total: total} when total > 1000],

@@ -1,13 +1,12 @@
 defmodule RuleBook.EngineMatchTest do
   use ExUnit.Case, async: true
-  alias RuleBook.DSL
 
   defmodule Order do
     defstruct [:id, :total]
   end
 
   defmodule Rules do
-    use DSL
+    use RuleBook.Rules
 
     defrule :vip_large_order,
       when: [

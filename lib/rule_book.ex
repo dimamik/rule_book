@@ -1,9 +1,35 @@
 defmodule RuleBook do
-  @moduledoc """
-  RuleBook is a lightweight, deterministic forward-chaining rules engine for Elixir.
+  @external_resource readme_path = Path.expand("../../README.md", __DIR__)
+  @readme_intro (case File.read(readme_path) do
+                   {:ok, content} ->
+                     content
+                     |> String.split("<!-- RULEBOOK:INTRO:START -->")
+                     |> List.last()
+                     |> String.split("<!-- RULEBOOK:INTRO:END -->")
+                     |> List.first()
+                     |> String.trim()
 
-  This module provides the public API for managing sessions, facts, agenda, and
-  running rules. See `RuleBook.DSL` for defining rules.
+                   _ ->
+                     ""
+                 end)
+
+  @moduledoc """
+  #{@readme_intro}
+
+  Terminology:
+  - Rules: Modules that `use RuleBook.Rules` and define `defrule` clauses.
+  - Fact: Any Elixir term asserted into the working memory.
+  - Pattern: A struct/map pattern in a rule's `when:` list. Patterns may include guards.
+  - Binding: Map of variables bound by matched patterns and unified across them.
+  - Agenda: Ordered list of activations ready to fire.
+  - Activation: A rule + bindings scheduled to run.
+  - Effects: Pure data describing side-effects produced by actions (assert, retract, emit, log).
+
+  Purity and side-effects:
+  - Rule actions should be pure. They return effects using `RuleBook.Action` helpers.
+  - The engine applies effects to the session. Emitted events (`{:emit, name, payload}`) are not delivered anywhere by default; your application is responsible for reacting to them.
+
+  See `RuleBook.Rules` for how to define rules.
   """
 
   alias RuleBook.Types
@@ -49,7 +75,7 @@ defmodule RuleBook do
     if function_exported?(mod, :__rulebook_rules__, 0) do
       mod.__rulebook_rules__()
     else
-      raise ArgumentError, "#{inspect(mod)} does not define any rules. Use RuleBook.DSL"
+      raise ArgumentError, "#{inspect(mod)} does not define any rules. Use RuleBook.Rules"
     end
   end
 

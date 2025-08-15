@@ -1,10 +1,10 @@
 defmodule RuleBook.FraudDetectionTest do
   use ExUnit.Case, async: true
-  alias RuleBook.DSL
+
   alias RuleBook.Action
 
   defmodule FraudRules do
-    use DSL
+    use RuleBook.Rules
 
     defmodule User do
       defstruct [:id, :country]
@@ -23,8 +23,8 @@ defmodule RuleBook.FraudDetectionTest do
         %Payment{id: payment_id, user_id: uid, country: pay_country},
         %User{id: uid, country: user_country} when pay_country != user_country
       ],
-      then: fn %{binding: context} ->
-        Action.assert(context, %Decision{
+      then: fn %{binding: context} = ctx ->
+        Action.assert(ctx, %Decision{
           payment_id: context.payment_id,
           status: :blocked,
           reason: :country_mismatch
@@ -35,7 +35,7 @@ defmodule RuleBook.FraudDetectionTest do
 
   test "blocks payment when user and payment countries differ" do
     user = %FraudRules.User{id: 1, country: :US}
-    payment = %FraudRules.Payment{id: 10, user_id: 1, amount: 125_00, country: :DE}
+    payment = %FraudRules.Payment{id: 10, user_id: 1, amount: 12_500, country: :DE}
 
     {:ok, rb} = RuleBook.new(rules: FraudRules)
     rb = rb |> RuleBook.assert(user) |> RuleBook.assert(payment)
@@ -55,7 +55,7 @@ defmodule RuleBook.FraudDetectionTest do
 
   test "allows payment when countries match" do
     user = %FraudRules.User{id: 1, country: :US}
-    payment = %FraudRules.Payment{id: 11, user_id: 1, amount: 50_00, country: :US}
+    payment = %FraudRules.Payment{id: 11, user_id: 1, amount: 5_000, country: :US}
 
     {:ok, rb} = RuleBook.new(rules: FraudRules)
     rb = rb |> RuleBook.assert(user) |> RuleBook.assert(payment)
@@ -73,7 +73,7 @@ defmodule RuleBook.FraudDetectionTest do
 
   test "allows payment when countries differ for different users" do
     user = %FraudRules.User{id: 1, country: :US}
-    payment = %FraudRules.Payment{id: 10, user_id: 2, amount: 125_00, country: :DE}
+    payment = %FraudRules.Payment{id: 10, user_id: 2, amount: 12_500, country: :DE}
 
     {:ok, rb} = RuleBook.new(rules: FraudRules)
     rb = rb |> RuleBook.assert(user) |> RuleBook.assert(payment)

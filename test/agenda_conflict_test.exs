@@ -1,13 +1,12 @@
 defmodule RuleBook.AgendaConflictTest do
   use ExUnit.Case, async: true
-  alias RuleBook.DSL
 
   defmodule Order do
     defstruct [:id, :total]
   end
 
   defmodule Rules do
-    use DSL
+    use RuleBook.Rules
 
     defrule :r1,
       when: [%Order{id: id, total: total} when total > 100],

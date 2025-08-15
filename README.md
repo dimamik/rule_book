@@ -1,6 +1,27 @@
 # RuleBook
 
+<!-- RULEBOOK:INTRO:START -->
+
 A lightweight, deterministic forward-chaining rules engine for Elixir.
+
+RuleBook lets you declare rules over your domain facts using Elixir pattern matching and guards.
+It unifies variables across patterns, builds an agenda of activations, and executes pure actions
+that return effects (assert, retract, emit, log). Your application applies these effects; in
+particular, emitted events are your responsibility to observe and handle.
+
+Key concepts:
+
+- Rule module: a module that `use`s `RuleBook.Rules` and defines `defrule` clauses.
+- Fact: any Elixir term asserted into the working memory.
+- Pattern: a struct/map pattern used in `when: [...]`; can have guards (`when ...`).
+- Binding: variables bound by patterns and unified across them.
+- Agenda: ordered list of activations ready to fire based on salience (priority).
+- Activation: a specific rule with a concrete set of bindings.
+- Effects: pure descriptions of changes (assert/retract), logs, or emitted events.
+
+Actions should be pure functions that return effects using `RuleBook.Action` helpers.
+
+<!-- RULEBOOK:INTRO:END -->
 
 ## Installation
 
@@ -32,19 +53,15 @@ defmodule FraudRules do
   defrule :block_if_country_mismatch,
     when: [
       %Payment{id: payment_id, user_id: uid, country: pay_country},
-      %User{id: uid, country: user_country}
+      %User{id: uid, country: user_country} when pay_country != user_country
     ],
     then: fn ctx ->
       b = ctx.binding
-      if b.pay_country != b.user_country do
-        RuleBook.Action.assert(ctx, %Decision{
-          payment_id: b.payment_id,
-          status: :blocked,
-          reason: :country_mismatch
-        })
-      else
-        ctx
-      end
+      RuleBook.Action.assert(ctx, %Decision{
+        payment_id: b.payment_id,
+        status: :blocked,
+        reason: :country_mismatch
+      })
     end,
     salience: 10
 end
@@ -72,6 +89,15 @@ case blocked? do
 end
 ```
 
-Documentation can be generated with [ExDoc](https://github.com/elixir-lang/ex_doc)
-and published on [HexDocs](https://hexdocs.pm). Once published, the docs can
-be found at <https://hexdocs.pm/rule_book>.
+## Guards and unification
+
+You can compare values across different facts using guards and shared variable names:
+
+```elixir
+defrule :country_mismatch,
+  when: [
+    %Payment{user_id: uid, country: pay_country},
+    %User{id: uid, country: user_country} when pay_country != user_country
+  ],
+  then: fn ctx -> ctx end
+```

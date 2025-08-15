@@ -1,6 +1,6 @@
 defmodule RuleBook.DSLTest do
   use ExUnit.Case, async: true
-  alias RuleBook.DSL
+
   alias RuleBook.Types
 
   defmodule Order do
@@ -8,7 +8,7 @@ defmodule RuleBook.DSLTest do
   end
 
   defmodule Rules do
-    use DSL
+    use RuleBook.Rules
 
     defrule :flag_large_order,
       when: [

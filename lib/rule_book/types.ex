@@ -34,8 +34,8 @@ defmodule RuleBook.Types do
 
     @type t :: %__MODULE__{
             matcher: (term() -> {:ok, map()} | :nomatch),
-            # guard receives the merged bindings so far and must return truthy/falsey
-            guard: nil | (map() -> as_boolean(term()))
+            # guard receives the merged bindings so far and must return a boolean
+            guard: nil | (map() -> boolean())
           }
   end
 end
